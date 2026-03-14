@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Protobuf 解码器 · 好友GID提取</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            font-family: system-ui, -apple-system, 'Segoe UI', Roboto, monospace;
+        }
+        body {
+            background: #f5f7fb;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+        .container {
+            width: 1200px;
+            max-width: 100%;
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        .header {
+            padding: 24px 28px;
+            background: #1a2639;
+            color: white;
+        }
+        .header h1 {
+            margin: 0;
+            font-size: 1.8rem;
+            font-weight: 500;
+        }
+        .main {
+            display: flex;
+            flex-direction: row;
+            height: 600px; /* 略微降低高度给提取条腾出空间 */
+        }
+        .input-panel, .output-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .input-panel {
+            border-right: 1px solid #e9ecf2;
+        }
+        .panel-header {
+            padding: 16px 20px;
+            background: #f2f5f9;
+            font-weight: 600;
+            color: #1e2b3c;
+            border-bottom: 1px solid #dce1e9;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-header button {
+            background: white;
+            border: 1px solid #ccd3de;
+            border-radius: 40px;
+            padding: 6px 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            color: #2c3e5a;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .panel-header button:hover {
+            background: #e0e6f0;
+        }
+        textarea {
+            width: 100%;
+            flex: 1;
+            padding: 20px;
+            border: none;
+            outline: none;
+            resize: none;
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            background: white;
+        }
+        #output {
+            padding: 20px;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: 'Fira Code', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            background: #fafbff;
+            margin: 0;
+            height: 100%;
+        }
+        /* 提取结果栏 */
+        .extract-bar {
+            background: #e4edfb;
+            padding: 14px 28px;
+            border-top: 1px solid #c3d2e9;
+            border-bottom: 1px solid #c3d2e9;
+            font-size: 0.95rem;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            flex-wrap: wrap;
+        }
+        .extract-label {
+            font-weight: 600;
+            color: #0f2b4f;
+            background: #ffffffb0;
+            padding: 4px 12px;
+            border-radius: 40px;
+            font-size: 0.9rem;
+            letter-spacing: 0.3px;
+        }
+        .extract-value {
+            font-family: 'Fira Code', monospace;
+            background: #1e2b3c;
+            color: #b7e4ff;
+            padding: 6px 18px;
+            border-radius: 40px;
+            font-size: 1.1rem;
+            font-weight: 500;
+            word-break: break-all;
+            flex: 1;
+        }
+        .extract-value.empty {
+            background: #d1dae8;
+            color: #3f4f6b;
+            font-style: italic;
+            font-weight: 400;
+        }
+        .footer {
+            padding: 16px 28px;
+            background: #edf2f9;
+            font-size: 0.85rem;
+            color: #3f5575;
+            border-top: 1px solid #d0dae8;
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <h1>🔓 Protobuf 解码器 · 好友GID提取</h1>
+    </div>
+    <div class="main">
+        <div class="input-panel">
+            <div class="panel-header">
+                <span>📥 输入 (十六进制)</span>
+                <button id="clearBtn">清空</button>
+            </div>
+            <textarea id="input" placeholder="粘贴十六进制数据... 例如: 0a 1b 67 61 6d 65"></textarea>
+        </div>
+        <div class="output-panel">
+            <div class="panel-header">
+                <span>📤 解码结果</span>
+                <button id="decodeBtn">解码</button>
+            </div>
+            <pre id="output"></pre>
+        </div>
+    </div>
+    <!-- 新增：提取的好友GID展示区域 -->
+    <div class="extract-bar">
+        <span class="extract-label">👥 好友GID</span>
+        <span id="extractGids" class="extract-value empty">等待解码...</span>
+    </div>
+    <div class="footer">
+        ⚡ 支持 Varint · 嵌套 · 自动识别字符串/子消息 · 字段以数字索引显示<br>
+        ✨ 当检测到顶层 "1" 为 "gamepb.friendpb.FriendService" 时，自动提取 "2.1" 数组中每个元素的 "1" 值作为好友GID。
+    </div>
+</div>
+
+<script>
+class ProtobufDecoder {
+    constructor(buffer) {
+        this.buffer = buffer;
+        this.offset = 0;
+    }
+
+    readVarint() {
+        let val = 0;
+        let shift = 0;
+        let b;
+        do {
+            b = this.buffer[this.offset++];
+            val |= (b & 0x7F) << shift;
+            shift += 7;
+        } while (b & 0x80);
+        return val >>> 0;
+    }
+
+    readBytes(len) {
+        const bytes = this.buffer.slice(this.offset, this.offset + len);
+        this.offset += len;
+        return bytes;
+    }
+
+    isPrintable(bytes) {
+        for (let i = 0; i < Math.min(bytes.length, 100); i++) {
+            if (bytes[i] < 32 || bytes[i] > 126) return false;
+        }
+        return true;
+    }
+
+    bytesToString(bytes) {
+        try {
+            return new TextDecoder('utf-8').decode(bytes);
+        } catch {
+            return '[' + Array.from(bytes).map(b => '\\x' + b.toString(16).padStart(2,'0')).join('') + ']';
+        }
+    }
+
+    decode() {
+        const result = {};
+        
+        while (this.offset < this.buffer.length) {
+            const key = this.readVarint();
+            const fieldNum = key >> 3;
+            const wireType = key & 0x07;
+            
+            if (wireType === 0) {
+                const val = this.readVarint();
+                if (!result[fieldNum]) result[fieldNum] = val;
+                else {
+                    if (!Array.isArray(result[fieldNum])) result[fieldNum] = [result[fieldNum]];
+                    result[fieldNum].push(val);
+                }
+            }
+            else if (wireType === 2) {
+                const len = this.readVarint();
+                const bytes = this.readBytes(len);
+                
+                let value;
+                
+                if (len === 0) {
+                    value = '';
+                }
+                else if (this.isPrintable(bytes)) {
+                    value = this.bytesToString(bytes);
+                }
+                else {
+                    try {
+                        const nestedDecoder = new ProtobufDecoder(bytes);
+                        const nested = nestedDecoder.decode();
+                        if (Object.keys(nested).length > 0) {
+                            value = nested;
+                        } else {
+                            value = '[bytes ' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('').substring(0, 40) + '...]';
+                        }
+                    } catch {
+                        value = '[bytes ' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('').substring(0, 40) + '...]';
+                    }
+                }
+                
+                if (!result[fieldNum]) result[fieldNum] = value;
+                else {
+                    if (!Array.isArray(result[fieldNum])) result[fieldNum] = [result[fieldNum]];
+                    result[fieldNum].push(value);
+                }
+            }
+            else if (wireType === 1) {
+                const bytes = this.readBytes(8);
+                const val = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+                if (!result[fieldNum]) result[fieldNum] = val;
+                else {
+                    if (!Array.isArray(result[fieldNum])) result[fieldNum] = [result[fieldNum]];
+                    result[fieldNum].push(val);
+                }
+            }
+            else if (wireType === 5) {
+                const bytes = this.readBytes(4);
+                const val = '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join('');
+                if (!result[fieldNum]) result[fieldNum] = val;
+                else {
+                    if (!Array.isArray(result[fieldNum])) result[fieldNum] = [result[fieldNum]];
+                    result[fieldNum].push(val);
+                }
+            }
+            else {
+                const val = `[wire_type_${wireType}]`;
+                if (!result[fieldNum]) result[fieldNum] = val;
+                else {
+                    if (!Array.isArray(result[fieldNum])) result[fieldNum] = [result[fieldNum]];
+                    result[fieldNum].push(val);
+                }
+            }
+        }
+        
+        return result;
+    }
+}
+
+function hexToBytes(hex) {
+    hex = hex.replace(/\s+/g, '');
+    if (!hex) return new Uint8Array(0);
+    if (hex.length % 2 !== 0) hex = '0' + hex;
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes[i/2] = parseInt(hex.substr(i, 2), 16);
+    }
+    return bytes;
+}
+
+function formatJSON(obj, indent = 0) {
+    if (obj === null) return 'null';
+    if (typeof obj === 'string') return JSON.stringify(obj);
+    if (typeof obj === 'number') return obj.toString();
+    if (Array.isArray(obj)) {
+        if (obj.length === 0) return '[]';
+        const items = obj.map(item => formatJSON(item, indent + 2));
+        return '[\n' + ' '.repeat(indent + 2) + items.join(',\n' + ' '.repeat(indent + 2)) + '\n' + ' '.repeat(indent) + ']';
+    }
+    if (typeof obj === 'object') {
+        const keys = Object.keys(obj);
+        if (keys.length === 0) return '{}';
+        const items = keys.map(key => {
+            const valStr = formatJSON(obj[key], indent + 2);
+            return `"${key}": ${valStr}`;
+        });
+        return '{\n' + ' '.repeat(indent + 2) + items.join(',\n' + ' '.repeat(indent + 2)) + '\n' + ' '.repeat(indent) + '}';
+    }
+    return String(obj);
+}
+
+// 提取好友GID的核心函数
+function extractFriendGIDs(decodedObj) {
+    // 检查是否符合条件：存在顶层字段 "1" 且为对象，且该对象的 "1" 字段值 === "gamepb.friendpb.FriendService"
+    const topLevelOne = decodedObj["1"];
+    if (!topLevelOne || typeof topLevelOne !== "object" || Array.isArray(topLevelOne)) {
+        return null;   // 不满足条件
+    }
+    if (topLevelOne["1"] !== "gamepb.friendpb.FriendService") {
+        return null;   // 服务名不匹配
+    }
+
+    // 尝试获取好友列表字段：顶层 "2" 下的 "1"
+    const topLevelTwo = decodedObj["2"];
+    if (!topLevelTwo || typeof topLevelTwo !== "object") {
+        return [];     // 没有好友字段，返回空数组
+    }
+
+    const friendListField = topLevelTwo["1"];  // 可能是数组，也可能是单个对象，甚至缺失
+    if (!friendListField) {
+        return [];
+    }
+
+    const gids = [];
+
+    // 如果是数组，遍历每一项
+    if (Array.isArray(friendListField)) {
+        for (const item of friendListField) {
+            if (item && typeof item === "object" && item["1"] != null) {
+                // 确保是数字或可以转为数字的字符串；直接取值，保留原始类型（一般是number）
+                gids.push(item["1"]);
+            }
+        }
+    } 
+    // 如果是单个对象（可能只有一个好友时不是数组）
+    else if (typeof friendListField === "object" && friendListField !== null) {
+        if (friendListField["1"] != null) {
+            gids.push(friendListField["1"]);
+        }
+    }
+
+    return gids;
+}
+
+// 更新提取结果显示
+function updateExtractDisplay(gidsArray) {
+    const extractSpan = document.getElementById('extractGids');
+    if (!gidsArray || gidsArray.length === 0) {
+        extractSpan.className = 'extract-value empty';
+        extractSpan.textContent = '无好友GID或格式不符';
+    } else {
+        extractSpan.className = 'extract-value';
+        // 用英文逗号连接，并确保每个值都转为字符串（可能包含数字）
+        const gidStr = gidsArray.map(gid => String(gid)).join(',');
+        extractSpan.textContent = gidStr;
+    }
+}
+
+// 清空按钮同时清空提取结果
+function clearAll() {
+    inputEl.value = '';
+    outputEl.textContent = '';
+    const extractSpan = document.getElementById('extractGids');
+    extractSpan.className = 'extract-value empty';
+    extractSpan.textContent = '等待解码...';
+}
+
+const inputEl = document.getElementById('input');
+const outputEl = document.getElementById('output');
+const decodeBtn = document.getElementById('decodeBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+clearBtn.addEventListener('click', clearAll);
+
+decodeBtn.addEventListener('click', () => {
+    const hex = inputEl.value.trim();
+    if (!hex) {
+        outputEl.textContent = '请输入十六进制数据';
+        document.getElementById('extractGids').className = 'extract-value empty';
+        document.getElementById('extractGids').textContent = '无输入';
+        return;
+    }
+    
+    try {
+        const bytes = hexToBytes(hex);
+        if (bytes.length === 0) {
+            outputEl.textContent = '请输入有效的十六进制数据';
+            document.getElementById('extractGids').className = 'extract-value empty';
+            document.getElementById('extractGids').textContent = '无效数据';
+            return;
+        }
+        
+        const decoder = new ProtobufDecoder(bytes);
+        const result = decoder.decode();
+        // 显示完整格式化结果
+        outputEl.textContent = formatJSON(result, 0);
+
+        // 提取好友GID
+        const gids = extractFriendGIDs(result);
+        updateExtractDisplay(gids);
+    } catch (e) {
+        outputEl.textContent = '解码失败: ' + e.message;
+        document.getElementById('extractGids').className = 'extract-value empty';
+        document.getElementById('extractGids').textContent = '解码异常';
+    }
+});
+
+// 初始状态
+clearAll();
+
+// 可选：提供一个简单的示例数据，方便测试 (基于问题中的结构虚构一个hex，但实际hex太长，让用户自行粘贴)
+// 但我们可以通过注释提醒：用户可粘贴符合条件的数据测试
+</script>
+</body>
+</html>
