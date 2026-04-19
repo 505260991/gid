@@ -1,0 +1,7 @@
+services:
+  hdhive-unlocker:
+    build: .
+    container_name: hdhive-unlocker
+    ports:
+      - "8080:8080"
+    restart: unless-stopped

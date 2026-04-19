@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HDHive 链接解锁 + 115 自动提取</title>
+  <style>
+    :root { color-scheme: light; }
+    body { margin: 0; font-family: system-ui, -apple-system, Segoe UI, sans-serif; background: #f2f5fb; color: #1c2332; }
+    .wrap { max-width: 1000px; margin: 24px auto; background: #fff; border-radius: 16px; box-shadow: 0 16px 40px rgba(16,32,72,.12); overflow: hidden; }
+    .head { padding: 22px 24px; background: linear-gradient(120deg, #162342, #2f4c8a); color: #fff; }
+    .head h1 { margin: 0; font-size: 1.4rem; }
+    .head p { margin: 8px 0 0; opacity: .9; font-size: .95rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
+    .panel { border-top: 1px solid #e7ebf3; }
+    .panel:first-child { border-right: 1px solid #edf0f6; }
+    .panel h3 { margin: 0; padding: 14px 16px; background: #f8faff; border-bottom: 1px solid #edf0f6; font-size: .95rem; }
+    .panel .inner { padding: 14px 16px; }
+    label { display: block; font-size: .88rem; color: #50607b; margin-bottom: 8px; }
+    input, textarea { width: 100%; border: 1px solid #d5ddeb; border-radius: 10px; padding: 10px 12px; font-size: 14px; box-sizing: border-box; }
+    textarea { min-height: 220px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .actions { padding: 12px 16px 18px; border-top: 1px solid #edf0f6; display: flex; gap: 10px; }
+    button { border: none; border-radius: 10px; padding: 10px 14px; font-weight: 600; cursor: pointer; }
+    #runBtn { background: #2f66f2; color: #fff; }
+    #clearBtn { background: #edf1ff; color: #31487f; }
+    #copyAllBtn { background: #00a174; color: #fff; margin-left: auto; }
+    .list { display: grid; gap: 10px; }
+    .item { border: 1px solid #dde5f3; border-radius: 10px; padding: 10px; background: #fafcff; }
+    .item code { font-size: 13px; word-break: break-all; display: block; }
+    .meta { font-size: .85rem; color: #4a5978; margin: 6px 0; }
+    .copy { background: #242f4b; color: #fff; padding: 7px 10px; border-radius: 8px; font-size: .86rem; }
+    .hint { padding: 12px 16px 16px; font-size: .84rem; color: #4b5f84; border-top: 1px dashed #dde4f2; background: #f8fbff; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .panel:first-child { border-right: 0; border-bottom: 1px solid #edf0f6; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head">
+      <h1>🔓 HDHive 链接解锁 + 115 自动提取 + 一键复制</h1>
+      <p>支持粘贴文本或网页 URL，自动识别 115 分享链接与提取码（用于合规分享场景）。</p>
+    </div>
+
+    <div class="grid">
+      <section class="panel">
+        <h3>输入区域</h3>
+        <div class="inner">
+          <label for="urlInput">可选：输入页面 URL（例如 HDHive 详情页）</label>
+          <input id="urlInput" type="url" placeholder="https://example.com/post/123" />
+
+          <label for="textInput" style="margin-top:12px;">文本内容（支持混合粘贴）</label>
+          <textarea id="textInput" placeholder="在这里粘贴含 115 链接/提取码的文本..."></textarea>
+        </div>
+        <div class="actions">
+          <button id="runBtn">开始提取</button>
+          <button id="clearBtn">清空</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h3>提取结果</h3>
+        <div class="inner">
+          <div id="summary" class="meta">等待提取...</div>
+          <div id="resultList" class="list"></div>
+        </div>
+        <div class="actions">
+          <button id="copyAllBtn">复制全部</button>
+        </div>
+      </section>
+    </div>
+
+    <div class="hint">提示：本工具只做文本解析和提取，不绕过任何登录、付费墙或访问控制。</div>
+  </div>
+
+  <script>
+    const byId = (id) => document.getElementById(id);
+    const textInput = byId('textInput');
+    const urlInput = byId('urlInput');
+    const summary = byId('summary');
+    const resultList = byId('resultList');
+
+    function render(items, hdhiveLinks) {
+      resultList.innerHTML = '';
+      summary.textContent = `共提取 ${items.length} 条 115 链接；检测到 HDHive 链接 ${hdhiveLinks.length} 条。`;
+
+      if (!items.length) {
+        resultList.innerHTML = '<div class="meta">未检测到可用的 115 分享链接。</div>';
+        return;
+      }
+
+      for (const item of items) {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerHTML = `
+          <code>${item.panUrl}</code>
+          <div class="meta">提取码：${item.code || '未识别'}</div>
+          <button class="copy">复制：${item.quickCopy}</button>
+        `;
+        div.querySelector('.copy').addEventListener('click', async () => {
+          await navigator.clipboard.writeText(item.quickCopy);
+          div.querySelector('.copy').textContent = '已复制';
+          setTimeout(() => div.querySelector('.copy').textContent = `复制：${item.quickCopy}`, 1200);
+        });
+        resultList.appendChild(div);
+      }
+    }
+
+    async function run() {
+      summary.textContent = '提取中...';
+      resultList.innerHTML = '';
+      try {
+        const res = await fetch('/api/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: textInput.value,
+            url: urlInput.value,
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '请求失败');
+        render(data.items || [], data.hdhiveLinks || []);
+      } catch (err) {
+        summary.textContent = `失败：${err.message}`;
+      }
+    }
+
+    byId('runBtn').addEventListener('click', run);
+    byId('clearBtn').addEventListener('click', () => {
+      textInput.value = '';
+      urlInput.value = '';
+      summary.textContent = '已清空。';
+      resultList.innerHTML = '';
+    });
+
+    byId('copyAllBtn').addEventListener('click', async () => {
+      const lines = [...resultList.querySelectorAll('.item .copy')].map(btn => btn.textContent.replace(/^复制：/, ''));
+      if (!lines.length) return;
+      await navigator.clipboard.writeText(lines.join('\n'));
+      summary.textContent = `已复制 ${lines.length} 条到剪贴板。`;
+    });
+  </script>
+</body>
+</html>
