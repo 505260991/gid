@@ -54,3 +54,14 @@ docker compose up -d --build
   "hdhiveLinks": []
 }
 ```
+
+## Docker 部署排错
+
+- 如果你之前拉取的是旧版本，`Dockerfile` 里可能包含 `COPY static ./static`，在 `static/` 目录不存在时会构建失败。当前版本已移除该步骤。
+- 建议先执行：
+
+```bash
+docker compose down
+docker compose build --no-cache
+docker compose up -d
+```
