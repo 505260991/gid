@@ -1,4 +1,4 @@
-from app.parser import parse_unlock_items, extract_hdhive_urls
+from app.parser import extract_hdhive_urls, parse_unlock_items
 
 
 def test_parse_115_with_code():
@@ -19,3 +19,16 @@ def test_extract_hdhive_link():
     text = "文章: https://hdhive.example.com/posts/7"
     links = extract_hdhive_urls(text)
     assert links == ["https://hdhive.example.com/posts/7"]
+
+
+def test_parse_from_html_source_without_api():
+    html = '''
+    <html><body>
+      <a href="https://115.com/s/hello99?password=ab12">download</a>
+      <script>var note = "提取码: ab12"</script>
+    </body></html>
+    '''
+    items = parse_unlock_items(html)
+    assert len(items) == 1
+    assert items[0].pan_url == "https://115.com/s/hello99"
+    assert items[0].code == "ab12"

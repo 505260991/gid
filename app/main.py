@@ -36,7 +36,7 @@ def unlock():
             resp = requests.get(fetch_url, timeout=12)
             resp.raise_for_status()
         except requests.RequestException as exc:
-            return jsonify({"error": f"抓取失败: {exc}"}), 400
+            return jsonify({"error": f"抓取失败: {exc}。若目标站点无公开 API 或有反爬限制，请直接粘贴网页源码到文本框解析。"}), 400
 
         merged_text = f"{merged_text}\n{resp.text}"
         source = fetch_url
